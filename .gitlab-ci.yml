@@ -1,0 +1,118 @@
+image: registry.devsurfer.com/driveback/kubernetes-deploy
+variables:
+  # Application deployment domain
+  KUBE_DOMAIN: devsurfer.com
+  CLUSTER_NAME: DEVELOPMENT_CLUSTER
+  API_NAME: api
+
+stages:
+  - 'Build'
+  - 'Build for prod'
+  - 'Deploy to review'
+  - 'Deploy to dev'
+  - 'Deploy to prod'
+  - 'Clean up'
+
+# api CI
+################################################################################
+
+'Review: Build api':
+  stage: 'Build'
+  variables:
+    NODE_ENV: development
+    PLATFORM_PROJECT_NAME: $API_NAME
+  script:
+    - cd $API_NAME
+    - command build
+  when: manual
+  only:
+    - branches
+  except:
+    - dev
+    - master
+
+'Dev: Build api':
+  stage: 'Build'
+  variables:
+    NODE_ENV: development
+    PLATFORM_PROJECT_NAME: $API_NAME
+  script:
+    - cd $API_NAME
+    - command build
+  only:
+    - dev
+
+'Review: Deploy api':
+  stage: 'Deploy to review'
+  variables:
+    NODE_ENV: development
+    PLATFORM_PROJECT_NAME: $API_NAME
+  script:
+    - command deploy
+  environment:
+    name: review/$CI_COMMIT_REF_NAME
+    url: http://$API_NAME-$CI_ENVIRONMENT_SLUG.$KUBE_DOMAIN
+    on_stop: 'Review: Clear api'
+  when: manual
+  only:
+    - branches
+  except:
+    - dev
+    - master
+
+'Review: Clear api':
+  stage: 'Clean up'
+  variables:
+    GIT_STRATEGY: none
+    PLATFORM_PROJECT_NAME: $API_NAME
+  script:
+    - command destroy
+  environment:
+    name: review/$CI_COMMIT_REF_NAME
+    action: stop
+  when: manual
+  only:
+    - branches
+  except:
+    - dev
+    - master
+
+'Dev: Deploy api':
+  stage: 'Deploy to dev'
+  variables:
+    NODE_ENV: development
+    PLATFORM_PROJECT_NAME: $API_NAME
+  script:
+    - command deploy
+  environment:
+    name: $API_NAME
+    url: http://$API_NAME.$KUBE_DOMAIN
+  only:
+    - dev
+
+'Prod: Build api':
+  stage: 'Build for prod'
+  variables:
+    NODE_ENV: production
+    CLUSTER_NAME: PRODUCTION_CLUSTER
+    PLATFORM_PROJECT_NAME: $API_NAME
+  script:
+    - cd $API_NAME
+    - command build
+  only:
+    - master
+
+'Prod: Deploy api':
+  stage: 'Deploy to prod'
+  variables:
+    NODE_ENV: production
+    CLUSTER_NAME: PRODUCTION_CLUSTER
+    GKE_CONFIG_ROOT: "api/kubernetes"
+    PLATFORM_PROJECT_NAME: $API_NAME
+  script:
+    - command deploy
+  environment:
+    name: $API_NAME
+    url: http://$API_NAME.$KUBE_DOMAIN #todo: change to real prod
+  only:
+    - master

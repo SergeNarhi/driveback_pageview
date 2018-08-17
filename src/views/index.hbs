@@ -1,0 +1,5 @@
+<h1>This is a {{pageViews.length}} pageview of this page for last minute</h1>
+<h3>Log</h3>
+{{#each pageViews}}
+<p>id: {{this.id}}, timestamp: {{this.created_at}}</p>
+{{/each}}

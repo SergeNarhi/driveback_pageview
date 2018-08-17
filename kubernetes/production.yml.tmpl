@@ -1,0 +1,159 @@
+kind: StorageClass
+apiVersion: storage.k8s.io/v1beta1
+metadata:
+  name: fast
+provisioner: kubernetes.io/gce-pd
+parameters:
+  type: pd-ssd
+
+---
+
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: $name
+  labels:
+    app: $name
+    pipeline_id: "$CI_PIPELINE_ID"
+    build_id: "$CI_BUILD_ID"
+    tier: web
+spec:
+  replicas: 3
+  template:
+    metadata:
+      labels:
+        name: $name
+        app: $name
+        track: "$track"
+        tier: web
+    spec:
+      containers:
+      - name: app
+        image: $REGISTRY_IMAGE:$CI_REGISTRY_TAG
+        imagePullPolicy: Always
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: CI_PIPELINE_ID
+          value: "$CI_PIPELINE_ID"
+        - name: CI_BUILD_ID
+          value: "$CI_BUILD_ID"
+        ports:
+        - name: web
+          containerPort: 80
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 15
+          timeoutSeconds: 15
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 5
+          timeoutSeconds: 3
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: $name
+  labels:
+    app: $name
+    pipeline_id: "$CI_PIPELINE_ID"
+    build_id: "$CI_BUILD_ID"
+spec:
+  ports:
+    - name: web
+      port: 80
+      targetPort: web
+  selector:
+    app: $name
+    tier: web
+
+---
+
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: $name
+  labels:
+    app: $name
+    pipeline_id: "$CI_PIPELINE_ID"
+    build_id: "$CI_BUILD_ID"
+  annotations:
+    kubernetes.io/tls-acme: "true"
+    kubernetes.io/ingress.class: "nginx"
+spec:
+  tls:
+  - secretName: $name-production-tls
+    hosts:
+    - $CI_ENVIRONMENT_HOSTNAME
+  rules:
+  - host: $CI_ENVIRONMENT_HOSTNAME
+    http:
+      paths:
+      - path: /
+        backend:
+          serviceName: api
+          servicePort: 80
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: pg
+  labels:
+    name: pg
+    pipeline_id: "$CI_PIPELINE_ID"
+    build_id: "$CI_BUILD_ID"
+spec:
+  ports:
+  - port: 27017
+    targetPort: 27017
+  clusterIP: None
+  selector:
+    role: pg
+
+---
+
+apiVersion: apps/v1beta1
+kind: StatefulSet
+metadata:
+  name: pg
+spec:
+  serviceName: "pg"
+  replicas: 3
+  template:
+    metadata:
+      labels:
+        role: pg
+        environment: api
+    spec:
+      terminationGracePeriodSeconds: 10
+      containers:
+        - name: pg
+          image: postgres:10.4-alpine
+          env:
+            # todo: credentials from env
+            - POSTGRES_PASSWORD=driveback
+            - POSTGRES_USER=driveback
+            - POSTGRES_DB=driveback
+          ports:
+            - containerPort: 5432
+          volumeMounts:
+            - name: pg-persistent-storage
+              mountPath: /data/db
+  volumeClaimTemplates:
+  - metadata:
+      name: pg-persistent-storage
+      annotations:
+        volume.beta.kubernetes.io/storage-class: "fast"
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 30Gi
